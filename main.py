@@ -4,12 +4,12 @@ import sys, utime, ujson, gc, micropython, network, machine, ntptime
 #local imports
 import network_setup
 from time_manager import TimeManager
-#from data_stream import DataStreamClient
+from data_stream import DataStreamClient
 
 #DEBUG = False
 DEBUG = True
 
-SAMPLE_INTERVAL = 10 #seconds
+WEEKDAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"]
 
 #read the SECRET configuration file, NOTE this contains PRIVATE keys and 
 #should never be posted online
@@ -19,11 +19,11 @@ config = ujson.load(open("SECRET_CONFIG.json",'r'))
 sta_if, ap_if = network_setup.do_connect(**config["network_settings"])
 
 #configure the persistent data stream client
-#dbs = config['database_server_settings']
-#dsc = DataStreamClient(host=dbs['host'],
-#                       port=dbs['port'],
-#                       public_key=dbs['public_key'],
-#                       private_key=dbs['private_key'])
+dbs = config['database_server_settings']
+dsc = DataStreamClient(host=dbs['host'],
+                       port=dbs['port'],
+                       public_key=dbs['public_key'],
+                       private_key=dbs['private_key'])
 
 TM = TimeManager()
 print(TM.get_datetime())
@@ -47,7 +47,7 @@ while True:
     try:
         #check to see if we are still connected
         if sta_if.isconnected():
-            print("Network is connected.",d)
+            print("Network is connected.")
             pulse_led(500)
         else: #have no network connection
             print("Network is down!")
@@ -57,14 +57,15 @@ while True:
             utime.sleep_ms(500)
             pulse_led(500)
         
-        dt = TM.get_datetime() #(year, month, hour, min, second, millisecond, microseconds)
+        dt = TM.get_datetime() #(year, month, weekday, hour, min, second, millisecond)
         if DEBUG:
             print("raw dt =",dt)
-        year, month, day, hour, minute, second, _, _= dt
-        #hour += config['main_loop_settings']['tz_hour_shift'] #FIXME when is timezone correction needed?
-        print("The datetime is currently {year}-{month:02d}-{day:02d}T{hour:02d}:{minute:02d}:{second:02d}".format(
-              year=year, month=month, day=day, hour=hour, minute=minute, second=second))
-        
+        year, month, day, weekday, hour, minute, second, millisecond = dt
+        local_hour = (hour + config['main_loop_settings']['tz_hour_shift']) % 24
+        d['local_hour']    = local_hour
+        d['rtc_timestamp'] = "{year}-{month:02d}-{day:02d}T{hour:02d}:{minute:02d}:{second:02d}".format(
+              year=year, month=month, day=day, hour=hour, minute=minute, second=second)
+        print("The day of the week is {day_name} and the local hour is {local_hour:d}.".format(day_name=WEEKDAYS[weekday], local_hour = local_hour))
         #decide to turn light on or off
         when_start = config['main_loop_settings']['lamp_start_hour']
         when_stop  = config['main_loop_settings']['lamp_stop_hour']
@@ -73,10 +74,16 @@ while True:
         if hour >= when_start and hour < when_stop:
             print("Lamp is ON")
             lamp_pin.high()
+            d['lamp_state'] = "ON"
         else:
             print("Lamp is OFF")
             lamp_pin.low()
-            
+            d['lamp_state'] = "OFF"
+        print("DATA:", d)
+        #push data to the data stream
+        reply = dsc.push_data(d.items())
+        if DEBUG:
+            print(reply)
     except Exception as exc:
         #write error to log file
         #errorlog = open("errorlog.txt",'w')

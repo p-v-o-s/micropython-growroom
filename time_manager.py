@@ -16,10 +16,14 @@ NTP_DELTA = 3155673600
 
 host = "pool.ntp.org"
 
+#DEBUG = False
+DEBUG = True
+
 class TimeManager(object):
     def __init__(self):
         #load the station network interface so we can determine connection status
         self.sta_if = network.WLAN(network.STA_IF)
+        self.rtc = machine.RTC()
 
     def request_ntp_time(self):
         NTP_QUERY = bytearray(48)
@@ -34,8 +38,9 @@ class TimeManager(object):
         # There's currently no timezone support in MicroPython, so
         # utime.localtime() will return UTC time (as if it was .gmtime())
         t = val - NTP_DELTA
-        print(t)
         tm = utime.localtime(t)
+        if DEBUG:
+            print("Received NTP time t=%d, tm=%r" % (t,tm))
         return tm
     
     def get_datetime(self, force_RTC_time = False, sync_RTC = True):
@@ -43,12 +48,16 @@ class TimeManager(object):
             try:
                 tm = self.request_ntp_time()
                 dt = tm[0:3] + (0,) + tm[3:6] + (0,)
-                dt = tm
                 if sync_RTC:
-                    machine.RTC().datetime(dt) #sync the RTC
+                    if DEBUG:
+                        print("Synchronizing RTC to NTP time")
+                        print("RTC time before:",self.rtc.datetime())
+                    self.rtc.datetime(dt) #sync the RTC
+                    if DEBUG:
+                        print("RTC time after:",self.rtc.datetime())
             except OSError as err:
                 print("WARNING! got exception: %s" % err)
-        return machine.RTC().datetime()
+        return self.rtc.datetime()
             
 ################################################################################
 # TEST CODE
